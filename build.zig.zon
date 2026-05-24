@@ -1,0 +1,109 @@
+.{
+    .name = .zig_nri,
+    .version = "179.0.0",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x29dd9e82edcb07e0,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+    },
+    .dependencies = .{
+        .nri = .{
+            .path = "../NRI",
+            //.url = "https://github.com/swan-www/NRI/archive/refs/tags/v179.zip",
+            //.hash = "N-V-__8AAKFOjAPblBRKaUrjSSH-09iZsd0hSjTHMs3Wj2BE",
+            .lazy = true,
+        },
+        .nri_samples = .{
+            .url = "https://github.com/swan-www/NRISamples/archive/7de149dff858d6ea5a3285af55d8df2a93367d73.zip",
+            .hash = "N-V-__8AAIwXCQBqEyrmafaHbD3sLaIX47wqbkSGH9U4vMC6",
+            .lazy = true,
+        },
+        .nri_framework = .{ //for nri_samples
+            .url = "https://github.com/NVIDIA-RTX/NRIFramework/archive/7d0976e89ae4c8c628a5d4f462decb496a0ec90e.zip",
+            .hash = "N-V-__8AADoIDQAtrv48PJ5EHAj1fVxYySmYQ8o1dQmPCXIV",
+            .lazy = true,
+        },
+        .imgui = .{ //for nri_samples
+            .url = "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.6.zip",
+            .hash = "N-V-__8AAOFTdQAa3gpnG7QEvD3aZ6vs3IaP9LzzAt_bGdsu",
+            .lazy = true,
+        },
+        .glfw = .{ //for nri_samples
+            .url = "https://github.com/glfw/glfw/releases/download/3.4/glfw-3.4.bin.WIN64.zip",
+            .hash = "N-V-__8AAOlnwQD_q2VUB2dZD64hwX7kJ2w9knrChBKgJHe0",
+            .lazy = true,
+        },
+        .nv_math = .{ //for nri_samples
+            .url = "https://github.com/NVIDIA-RTX/MathLib/archive/refs/tags/v11.zip",
+            .hash = "N-V-__8AAK6OBwCa5n96KhsfE8IbVp6WOzumVkphnAINY2Ky",
+            .lazy = true,
+        },
+        .dx12_headers = .{
+            .url = "https://github.com/swan-www/DirectX-Headers/archive/refs/tags/v1.619.1.zip",
+            .hash = "N-V-__8AAGDkQAC-N44dhfT9Szcv4b6j5gq_bJe_mnBt60EM",
+            .lazy = true,
+        },
+        .agility_sdk = .{
+            .url = "https://github.com/swan-www/D3D12MemoryAllocator/releases/download/d3d12.1.619.2/microsoft.direct3d.d3d12.1.619.2.zip",
+            .hash = "N-V-__8AAP8p8Ac10C2_xxC36nEgFe4VUyaJJ5O1fy_lGk2_",
+            .lazy = true,
+        },
+        .nvtx = .{
+            .url = "https://github.com/swan-www/NVTX/archive/refs/tags/v3.5.0.zip",
+            .hash = "N-V-__8AAGyu2gAt9nvt7pAQILqlX5SpouAOJ9a12c9icjhZ",
+            .lazy = true,
+        },
+        .vulkan_headers = .{
+            .url = "https://github.com/swan-www/Vulkan-Headers/archive/refs/tags/v1.4.350.zip",
+            .hash = "N-V-__8AAPnEbQK6L3hGtJefy0xZjeg7KOxIEj8_obZC2_lF",
+            .lazy = true,
+        },
+        .vulkan_allocator = .{
+            .url = "https://github.com/swan-www/VulkanMemoryAllocator/archive/b3cbbb43ea3a506dffe10759e205a41c27c35ae2.zip",
+            .hash = "N-V-__8AAEQTPwCBpcfOoQPJ-G1anGhST2Wk5Okcs5xHa25w",
+            .lazy = true,
+        },
+        .ngx_sdk = .{
+            .url = "https://github.com/swan-www/DLSS/archive/refs/tags/v310.6.0.zip",
+            .hash = "N-V-__8AAI9IwyPPN3-nmI5ImIXPARlf2Kxu3nYOleoxB5ed",
+            .lazy = true,
+        },
+        .ffx_sdk = .{
+            .url = "https://github.com/swan-www/FidelityFX-SDK/releases/download/v1.1.4/FidelityFX-SDK-v1.1.4.zip",
+            .hash = "N-V-__8AAJ-NzkBW75lNqwe-0U3J3nOZUuOqgxAsa1fh6LAI",
+            .lazy = true,
+        },
+        .xess_sdk = .{
+            .url = "https://github.com/swan-www/xess/archive/refs/tags/v3.0.1.zip",
+            .hash = "N-V-__8AAJdwhAa9fuetDyW-z9crZkE_5jA98pOJNKuNuht4",
+            .lazy = true,
+        },
+        .d3d12_allocator = .{
+            .url = "https://github.com/swan-www/D3D12MemoryAllocator/archive/96e58ad6f45f2e9ade7c631adba8a27db1635cb7.zip",
+            .hash = "N-V-__8AAFewLQAtgkw-7CuKAsis09fGHrtyA0oftss3MD5S",
+            .lazy = true,
+        },
+        .amd_ags = .{
+            .url = "https://github.com/swan-www/AGS_SDK/archive/refs/tags/v6.3.0.zip",
+            .hash = "N-V-__8AAOSX8QVgvTuQtahRif5fN4mLK1oOdIn3ERPSlvQZ",
+            .lazy = true,
+        },
+        .nvapi = .{
+            .url = "https://github.com/swan-www/nvapi/archive/9b181ea572f680327fe01a14a0f1f41c78034104.zip",
+            .hash = "N-V-__8AAN8RmAB_SJDaP-Imbzot9VPYC-2Ee-nvv0o2UoOD",
+            .lazy = true,
+        },
+        .shadermake = .{
+            .url = "https://github.com/swan-www/ShaderMake/archive/18f5a344e7ca8fa65daaf079d07bc8ce38453e05.zip",
+            .hash = "N-V-__8AAHvKAQCiRyl7w40xDH22g65Yt5oXdQV7lQ6HMjJz",
+            .lazy = true,
+        },
+        .dxc = .{
+            .url = "https://github.com/swan-www/DirectXShaderCompiler/releases/download/v1.9.2602/microsoft.direct3d.dxc.1.9.2602.17.zip",
+            .hash = "N-V-__8AAG2BNApKf1s3lcTmHkVgl2xPKt2G_t7KjacBj6u-",
+            .lazy = true,
+        },
+    },
+}
