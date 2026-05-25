@@ -1,0 +1,1 @@
+build -Dtarget=x86_64-windows-msvc -DNRI_ENABLE_SHADERMAKE -DNRI_ENABLE_SAMPLES -Doptimize=Debug -Dcpu=x86_64_v3 --summary all --prominent-compile-errors -freference-trace=4

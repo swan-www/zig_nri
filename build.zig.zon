@@ -10,9 +10,8 @@
     },
     .dependencies = .{
         .nri = .{
-            .path = "../NRI",
-            //.url = "https://github.com/swan-www/NRI/archive/refs/tags/v179.zip",
-            //.hash = "N-V-__8AAKFOjAPblBRKaUrjSSH-09iZsd0hSjTHMs3Wj2BE",
+            .url = "https://github.com/swan-www/NRI/archive/refs/tags/v179.zip",
+            .hash = "N-V-__8AAA2XIQCNFFcYGZAvBaz2UakJCZoOF878CViULV70",
             .lazy = true,
         },
         .nri_samples = .{
