@@ -48,7 +48,6 @@ const NRIOptions = struct {
         opt.EnableVKSupport = OptionFlag.option(b, "NRI_ENABLE_VK_SUPPORT", "Enable Vulkan backend.", true);
         opt.EnableValidationSupport = OptionFlag.option(b, "NRI_ENABLE_VALIDATION_SUPPORT", "Enable Validation backend (otherwise 'enableNRIValidation' is ignored)", true);
         opt.EnableNISSdk = OptionFlag.option(b, "NRI_ENABLE_NIS_SDK", "Enable NVIDIA Image Sharpening SDK", false);
-        opt.EnableImguiExtension = OptionFlag.option(b, "NRI_ENABLE_IMGUI_EXTENSION", "Enable 'NRIImgui", false);
         opt.StreamerThreadSafe = OptionFlag.option(b, "NRI_STREAMER_THREAD_SAFE", "NRIStreamer thread safety (OFF is faster)", true);
         //opt.EnableD3D11Support = OptionFlag.option(b, "NRI_ENABLE_D3D11_SUPPORT", "Enable D3D11 backend.", (target.result.os.tag == .windows));
         opt.EnableD3D12Support = OptionFlag.option(b, "NRI_ENABLE_D3D12_SUPPORT", "Enable D3D12 backend.", (target.result.os.tag == .windows));
@@ -66,7 +65,8 @@ const NRIOptions = struct {
         opt.EnableXESSSDK = OptionFlag.option(b, "NRI_ENABLE_XESS_SDK", "Enable INTEL XeSS SDK", xess_dep);
 
         opt.EnableNRISamples = OptionFlag.option(b, "NRI_ENABLE_SAMPLES", "Enable NRI Samples", false);
-        opt.EnableShaderMake = OptionFlag.option(b, "NRI_ENABLE_SHADERMAKE", "Enable ShaderMake", opt.EnableNRISamples.val or opt.EnableNISSdk.val);
+        opt.EnableImguiExtension = OptionFlag.option(b, "NRI_ENABLE_IMGUI_EXTENSION", "Enable imgui rendering support", opt.EnableNRISamples.val);
+        opt.EnableShaderMake = OptionFlag.option(b, "NRI_ENABLE_SHADERMAKE", "Enable ShaderMake", opt.EnableNRISamples.val or opt.EnableNISSdk.val or opt.EnableImguiExtension.val);
         return opt;
     }
 
@@ -101,6 +101,24 @@ const NRIOptions = struct {
         return defines_slice;
     }
 };
+
+pub fn installFile(b: *std.Build, dep: ?*std.Build.Step, src_path: std.Build.LazyPath, dest_path: []const u8) void {
+    const installedFile = b.addInstallFile(src_path, dest_path);
+    if (dep) |_| installedFile.step.dependOn(dep.?);
+    b.getInstallStep().dependOn(&installedFile.step);
+}
+
+pub fn installBinFile(b: *std.Build, dep: ?*std.Build.Step, src_path: std.Build.LazyPath, dest_path: []const u8) void {
+    const installedFile = b.addInstallBinFile(src_path, dest_path);
+    if (dep) |_| installedFile.step.dependOn(dep.?);
+    b.getInstallStep().dependOn(&installedFile.step);
+}
+
+pub fn installArtifact(b: *std.Build, dep: *std.Build.Step.Compile) void {
+    const installedFile = b.addInstallArtifact(dep, .{});
+    installedFile.step.dependOn(&dep.step);
+    b.getInstallStep().dependOn(&installedFile.step);
+}
 
 const NRI_AGILITY_SDK_VERSION_MAJOR = "619";
 const NGX_VERSION = "310.6.0";
@@ -158,18 +176,18 @@ pub fn build(b: *std.Build) !void {
     const mod_nri = b.addModule("nri", .{
         .target = target,
         .optimize = optimize,
+        .sanitize_thread = false,
+        .sanitize_c = .off,
     });
     const lib_nri = b.addLibrary(.{
         .name = "lib_nri",
         .root_module = mod_nri,
     });
-    lib_nri.linkLibCpp();
+    lib_nri.linkLibC();
     b.installArtifact(lib_nri);
 
-    //const installed_nri_zig = try std.fs.path.join(b.allocator, &.{ joined_target_str, "nri.zig" });
-    //const installTranslatedFile = b.addInstallFile(translate_nri.getOutput(), installed_nri_zig);
-    //installTranslatedFile.step.dependOn(&translate_nri.step);
-    //b.getInstallStep().dependOn(&installTranslatedFile.step);
+    const installed_nri_zig = try std.fs.path.join(b.allocator, &.{ joined_target_str, "nri.zig" });
+    installFile(b, &translate_nri.step, translate_nri.getOutput(), installed_nri_zig);
 
     const nri_option_defines = nri_options.get_defines(b.allocator);
     const nri_compile_defines = &.{
@@ -210,15 +228,30 @@ pub fn build(b: *std.Build) !void {
         vk_flags = vk_flags_backing[0..num_vk_flags];
     }
     const nri_joined_defines = try std.mem.concat(b.allocator, []const u8, &.{ nri_option_defines, nri_compile_defines, vk_flags });
+    translate_nri.defineCMacroRaw("WIN32_LEAN_AND_MEAN");
+    translate_nri.defineCMacroRaw("NOMINMAX");
+    translate_nri.defineCMacroRaw("_CRT_SECURE_NO_WARNINGS");
+    for (vk_flags) |def| {
+        translate_nri.defineCMacroRaw(def[2..]);
+    }
 
     //NRI
+    var lib_nri_shared: *std.Build.Step.Compile = undefined;
     if (nri) |_| {
-        const lib_nri_shared = b.addLibrary(.{
+        lib_nri_shared = b.addLibrary(.{
             .name = "lib_nri_shared",
             .root_module = b.addModule("nri_shared", .{
                 .target = target,
                 .optimize = optimize,
+                .sanitize_thread = false,
+                .sanitize_c = .off,
             }),
+        });
+
+        lib_nri_shared.root_module.addCSourceFile(.{
+            .file = nri.?.path("Source/Creation/Creation.cpp"),
+            .flags = nri_joined_defines,
+            .language = .cpp,
         });
 
         lib_nri_shared.root_module.addCSourceFiles(.{
@@ -233,11 +266,22 @@ pub fn build(b: *std.Build) !void {
         mod_nri.addWin32ResourceFile(.{
             .file = nri.?.path("Resources/NRI.rc"),
         });
-        const installed_resource_file_path = try std.fs.path.join(b.allocator, &.{ joined_target_str, "Resources/NRI.rc" });
-        const installResourceFile = b.addInstallFile(nri.?.path("Resources/NRI.rc"), installed_resource_file_path);
-        b.getInstallStep().dependOn(&installResourceFile.step);
+        //const installed_resource_file_path = try std.fs.path.join(b.allocator, &.{ joined_target_str, "Resources/NRI.rc" });
+        installBinFile(b, null, nri.?.path("Resources/NRI.rc"), "NRI.rc");
 
-        //lib_nri_shared.root_module.addIncludePath(nri.?.path(""));
+        if (target.result.os.tag == .windows) {
+            //mod_nri.linkSystemLibrary("kernel32", .{ .preferred_link_mode = .static });
+            //mod_nri.linkSystemLibrary("user32", .{ .preferred_link_mode = .static });
+            mod_nri.linkSystemLibrary("gdi32", .{ .preferred_link_mode = .static });
+            //mod_nri.linkSystemLibrary("winspool", .{ .preferred_link_mode = .static });
+            //mod_nri.linkSystemLibrary("shell32", .{ .preferred_link_mode = .static });
+            //mod_nri.linkSystemLibrary("ole32", .{ .preferred_link_mode = .static });
+            //mod_nri.linkSystemLibrary("oleaut32", .{ .preferred_link_mode = .static });
+            //mod_nri.linkSystemLibrary("uuid", .{ .preferred_link_mode = .static });
+            //mod_nri.linkSystemLibrary("comdlg32", .{ .preferred_link_mode = .static });
+            mod_nri.linkSystemLibrary("advapi32", .{ .preferred_link_mode = .static });
+        }
+
         lib_nri_shared.root_module.addIncludePath(nri.?.path("Include"));
         lib_nri_shared.root_module.addIncludePath(nri.?.path("Source/Shared"));
         translate_nri.addIncludePath(nri.?.path(""));
@@ -250,6 +294,10 @@ pub fn build(b: *std.Build) !void {
         //XESS
         if (xess_sdk) |_| {
             lib_nri_shared.root_module.addIncludePath(xess_sdk.?.path("inc/xess"));
+        }
+
+        if (nvtx) |_| {
+            lib_nri_shared.root_module.addIncludePath(nvtx.?.path("c/include"));
         }
 
         if (ngx_sdk) |_| {
@@ -267,6 +315,8 @@ pub fn build(b: *std.Build) !void {
                 .root_module = b.addModule("nri_d3d12", .{
                     .target = target,
                     .optimize = optimize,
+                    .sanitize_thread = false,
+                    .sanitize_c = .off,
                 }),
                 .linkage = .static,
             });
@@ -333,6 +383,8 @@ pub fn build(b: *std.Build) !void {
                 .root_module = b.addModule("nri_vk", .{
                     .target = target,
                     .optimize = optimize,
+                    .sanitize_thread = false,
+                    .sanitize_c = .off,
                 }),
             });
 
@@ -377,6 +429,8 @@ pub fn build(b: *std.Build) !void {
                 .root_module = b.addModule("nri_validation", .{
                     .target = target,
                     .optimize = optimize,
+                    .sanitize_thread = false,
+                    .sanitize_c = .off,
                 }),
             });
 
@@ -398,6 +452,8 @@ pub fn build(b: *std.Build) !void {
                 .root_module = b.addModule("nri_none", .{
                     .target = target,
                     .optimize = optimize,
+                    .sanitize_thread = false,
+                    .sanitize_c = .off,
                 }),
             });
 
@@ -435,23 +491,28 @@ pub fn build(b: *std.Build) !void {
         mod_nri.addLibraryPath(ffx_lib_path);
 
         if (nri_options.EnableD3D12Support.val) {
-            mod_nri.linkSystemLibrary("amd_fidelityfx_dx12", .{ .needed = true });
+            mod_nri.linkSystemLibrary("amd_fidelityfx_dx12", .{ .needed = true, .preferred_link_mode = .static });
         }
 
         if (nri_options.EnableVKSupport.val) {
-            mod_nri.linkSystemLibrary("amd_fidelityfx_vk", .{ .needed = true });
+            mod_nri.linkSystemLibrary("amd_fidelityfx_vk", .{ .needed = true, .preferred_link_mode = .static });
         }
     }
 
     //XESS
     if (xess_sdk) |_| {
-        mod_nri.addObjectFile(xess_sdk.?.path("lib/libxess.lib"));
+        //mod_nri.addObjectFile(xess_sdk.?.path("lib/libxess.lib"));
         mod_nri.addIncludePath(xess_sdk.?.path("inc/xess"));
 
         if (nri_options.EnableD3D12Support.val) {
-            const xess_lib_path = xess_sdk.?.path("bin");
+            const xess_lib_path = xess_sdk.?.path("lib");
+            const xess_bin_path = xess_sdk.?.path("bin");
             mod_nri.addLibraryPath(xess_lib_path);
-            mod_nri.linkSystemLibrary("libxess", .{ .needed = true });
+            mod_nri.addLibraryPath(xess_bin_path);
+            mod_nri.linkSystemLibrary("libxess", .{ .needed = true, .preferred_link_mode = .dynamic });
+
+            const xess_dll_path = try std.fs.path.join(b.allocator, &.{ "bin", "libxess.dll" });
+            installBinFile(b, null, xess_sdk.?.path(xess_dll_path), "libxess.dll");
         }
     }
 
@@ -477,10 +538,18 @@ pub fn build(b: *std.Build) !void {
 
         mod_nri.addLibraryPath(amd_ags.?.path("ags_lib/lib"));
         switch (target.result.cpu.arch) {
-            .x86_64 => mod_nri.linkSystemLibrary("amd_ags_x64", .{ .needed = true }),
-            .x86 => mod_nri.linkSystemLibrary("amd_ags_x86", .{ .needed = true }),
+            .x86_64 => mod_nri.linkSystemLibrary("amd_ags_x64", .{ .needed = true, .preferred_link_mode = .static }),
+            .x86 => mod_nri.linkSystemLibrary("amd_ags_x86", .{ .needed = true, .preferred_link_mode = .static }),
             else => {},
         }
+
+        const amd_ags_dll_name = switch (target.result.cpu.arch) {
+            .x86_64 => "amd_ags_x64.dll",
+            .x86 => "amd_ags_x86.dll",
+            else => unreachable,
+        };
+        const xess_dll_path = try std.fs.path.join(b.allocator, &.{ "ags_lib/lib", amd_ags_dll_name });
+        installBinFile(b, null, amd_ags.?.path(xess_dll_path), amd_ags_dll_name);
 
         b.addNamedLazyPath("amd_ags_hlsl_extension_include", amd_ags.?.path(""));
 
@@ -489,10 +558,14 @@ pub fn build(b: *std.Build) !void {
     }
 
     //NGX
+    var dlss_sr_dll_name: ?[]const u8 = null;
+    var dlss_rr_dll_name: ?[]const u8 = null;
+    var dlss_sr_dll_lazypath: ?std.Build.LazyPath = null;
+    var dlss_rr_dll_lazypath: ?std.Build.LazyPath = null;
     if (ngx_sdk) |_| {
         const ngx_obj_path: []const u8 = switch (target.result.os.tag) {
             .windows => switch (optimize) {
-                .Debug => "lib/Windows_x86_64/x64/nvsdk_ngx_s_dbg.lib",
+                .Debug => "lib/Windows_x86_64/x64/nvsdk_ngx_s.lib",
                 else => "lib/Windows_x86_64/x64/nvsdk_ngx_s.lib",
             },
             .linux => "lib/Linux_x86_64/libnvsdk_ngx.a",
@@ -502,7 +575,7 @@ pub fn build(b: *std.Build) !void {
             },
         };
 
-        const dlss_dll_path = b.fmt("lib/{s}/{s}", .{
+        const dlss_dll_bin_path = b.fmt("lib/{s}/{s}/", .{
             switch (target.result.os.tag) {
                 .windows => "Windows_x86_64",
                 .linux => "Linux_x86_64",
@@ -514,33 +587,42 @@ pub fn build(b: *std.Build) !void {
             },
         });
 
-        const dlss_sr_dll_name = switch (target.result.os.tag) {
-            .windows => "nvngx_dlss",
+        dlss_sr_dll_name = switch (target.result.os.tag) {
+            .windows => "nvngx_dlss.dll",
             .linux => "libnvidia-ngx-dlss.so." ++ NGX_VERSION,
             else => unreachable,
         };
 
-        const dlss_rr_dll_name = switch (target.result.os.tag) {
-            .windows => "nvngx_dlssd",
+        dlss_rr_dll_name = switch (target.result.os.tag) {
+            .windows => "nvngx_dlssd.dll",
             .linux => "libnvidia-ngx-dlssd.so." ++ NGX_VERSION,
             else => unreachable,
         };
 
-        mod_nri.addLibraryPath(ngx_sdk.?.path(dlss_dll_path));
-        mod_nri.linkSystemLibrary(dlss_sr_dll_name, .{ .needed = true });
-        mod_nri.linkSystemLibrary(dlss_rr_dll_name, .{ .needed = true });
+        const dlss_sr_dll_path = try std.mem.concat(b.allocator, u8, &.{ dlss_dll_bin_path, dlss_sr_dll_name.? });
+        const dlss_rr_dll_path = try std.mem.concat(b.allocator, u8, &.{ dlss_dll_bin_path, dlss_rr_dll_name.? });
+
+        dlss_sr_dll_lazypath = ngx_sdk.?.path(dlss_sr_dll_path);
+        dlss_rr_dll_lazypath = ngx_sdk.?.path(dlss_rr_dll_path);
 
         mod_nri.addObjectFile(ngx_sdk.?.path(ngx_obj_path));
         mod_nri.addIncludePath(ngx_sdk.?.path("include"));
     }
 
+    var shadermake_exe: ?*std.Build.Step.Compile = null;
+
     if (shadermake) |_| {
-        const shadermake_exe = b.addExecutable(.{
+        shadermake_exe = b.addExecutable(.{
             .name = "shadermake",
-            .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .sanitize_thread = false,
+                .sanitize_c = .off,
+            }),
         });
 
-        shadermake_exe.root_module.addCSourceFiles(.{
+        shadermake_exe.?.root_module.addCSourceFiles(.{
             .root = shadermake.?.path("ShaderMake"),
             .files = &.{
                 "ShaderBlob.cpp",
@@ -555,7 +637,7 @@ pub fn build(b: *std.Build) !void {
             .language = .cpp,
         });
 
-        shadermake_exe.root_module.addCSourceFiles(.{
+        shadermake_exe.?.root_module.addCSourceFiles(.{
             .root = shadermake.?.path("ShaderMake"),
             .files = &.{
                 "argparse.h",
@@ -569,76 +651,336 @@ pub fn build(b: *std.Build) !void {
             .language = .c,
         });
 
-        shadermake_exe.linkLibC();
+        shadermake_exe.?.linkLibC();
 
         switch (target.result.os.tag) {
             .windows => {},
-            .macos => shadermake_exe.root_module.linkSystemLibrary("pthread", .{}),
+            .macos => shadermake_exe.?.root_module.linkSystemLibrary("pthread", .{}),
             else => {
-                shadermake_exe.root_module.linkSystemLibrary("stdc++fs", .{});
-                shadermake_exe.root_module.linkSystemLibrary("pthread", .{});
+                shadermake_exe.?.root_module.linkSystemLibrary("stdc++fs", .{});
+                shadermake_exe.?.root_module.linkSystemLibrary("pthread", .{});
             },
         }
 
-        b.installArtifact(shadermake_exe);
+        b.installArtifact(shadermake_exe.?);
+    }
+
+    //dlss
+    if (dlss_sr_dll_lazypath) |_| {
+        installBinFile(b, null, dlss_sr_dll_lazypath.?, dlss_sr_dll_name.?);
+    }
+    if (dlss_rr_dll_lazypath) |_| {
+        installBinFile(b, null, dlss_rr_dll_lazypath.?, dlss_rr_dll_name.?);
+    }
+
+    const dxc = b.lazyDependency("dxc", .{});
+    const nv_math = b.lazyDependency("nv_math", .{});
+
+    if (shadermake_exe != null and dxc != null) {
+        const dxc_path = switch (@import("builtin").target.cpu.arch) {
+            .aarch64 => dxc.?.path("build/native/bin/arm64/dxc.exe"),
+            .x86 => dxc.?.path("build/native/bin/x86/dxc.exe"),
+            .x86_64 => dxc.?.path("build/native/bin/x64/dxc.exe"),
+            else => unreachable,
+        };
+
+        const shader_output_path = "_Shaders"; //try std.fs.path.join(b.allocator, &.{ b.exe_dir, "_Shaders" });
+
+        if (nri_options.EnableD3D12Support.val) {
+            const run_d3d12_shared, const d3d12_shared_shader_dir = run_shadermake_command(.{
+                .b = b,
+                .shadermake = shadermake_exe.?,
+                .target_api = .D3D12,
+                .shader_compiler_path = dxc_path,
+                .project_name = "NRI",
+                .source_dir = nri.?.path("Shaders"),
+                .shader_config_path = nri.?.path("Shaders/Shaders.cfg"),
+                .output_path = shader_output_path,
+                .include_paths = &.{
+                    nri.?.path("Shaders"),
+                    nri.?.path("Include"),
+                },
+                .s_reg_shift = "0",
+                .b_reg_shift = "0",
+                .u_reg_shift = "0",
+                .t_reg_shift = "0",
+                .header_blob = true,
+            });
+
+            b.getInstallStep().dependOn(&run_d3d12_shared.step);
+            lib_nri_shared.step.dependOn(&run_d3d12_shared.step);
+            lib_nri_shared.root_module.addIncludePath(d3d12_shared_shader_dir);
+        }
+
+        if (nri_options.EnableVKSupport.val) {
+            const run_vulkan_shared, const vulkan_shared_shader_dir = run_shadermake_command(.{
+                .b = b,
+                .shadermake = shadermake_exe.?,
+                .target_api = .Vulkan,
+                .shader_compiler_path = dxc_path,
+                .project_name = "NRI",
+                .source_dir = nri.?.path("Shaders"),
+                .shader_config_path = nri.?.path("Shaders/Shaders.cfg"),
+                .output_path = shader_output_path,
+                .include_paths = &.{
+                    nri.?.path("Shaders"),
+                    nri.?.path("Include"),
+                },
+                .s_reg_shift = "0",
+                .b_reg_shift = "0",
+                .u_reg_shift = "0",
+                .t_reg_shift = "0",
+                .header_blob = true,
+            });
+
+            b.getInstallStep().dependOn(&run_vulkan_shared.step);
+            lib_nri_shared.step.dependOn(&run_vulkan_shared.step);
+            lib_nri_shared.root_module.addIncludePath(vulkan_shared_shader_dir);
+        }
+
+        if (nri_samples) |_| {
+            if (nv_math != null) {
+                if (nri_options.EnableD3D12Support.val) {
+                    const run_d3d12, _ = run_shadermake_command(.{
+                        .b = b,
+                        .shadermake = shadermake_exe.?,
+                        .target_api = .D3D12,
+                        .shader_compiler_path = dxc_path,
+                        .project_name = "NRI_Samples",
+                        .source_dir = nri_samples.?.path("Shaders"),
+                        .shader_config_path = nri_samples.?.path("Shaders/Shaders.cfg"),
+                        .output_path = shader_output_path,
+                        .include_paths = &.{
+                            nri_samples.?.path("Shaders"),
+                            nv_math.?.path(""),
+                            nri.?.path("Include"),
+                        },
+                        .s_reg_shift = "0",
+                        .b_reg_shift = "32",
+                        .u_reg_shift = "64",
+                        .t_reg_shift = "128",
+                        .header_blob = false,
+                    });
+
+                    b.getInstallStep().dependOn(&run_d3d12.step);
+                }
+
+                if (nri_options.EnableVKSupport.val) {
+                    const run_vulkan, _ = run_shadermake_command(.{
+                        .b = b,
+                        .shadermake = shadermake_exe.?,
+                        .target_api = .Vulkan,
+                        .shader_compiler_path = dxc_path,
+                        .project_name = "NRI_Samples",
+                        .source_dir = nri_samples.?.path("Shaders"),
+                        .shader_config_path = nri_samples.?.path("Shaders/Shaders.cfg"),
+                        .output_path = shader_output_path,
+                        .include_paths = &.{
+                            nri_samples.?.path("Shaders"),
+                            nv_math.?.path(""),
+                            nri.?.path("Include"),
+                        },
+                        .s_reg_shift = "0",
+                        .b_reg_shift = "32",
+                        .u_reg_shift = "64",
+                        .t_reg_shift = "128",
+                        .header_blob = false,
+                    });
+
+                    b.getInstallStep().dependOn(&run_vulkan.step);
+                }
+            }
+        }
     }
 
     //NRI Samples demo
     if (nri_samples) |_| {
-        const nri_framework = b.lazyDependency("nri_framework", .{});
-        const glfw = b.lazyDependency("glfw", .{});
-        const nv_math = b.lazyDependency("nv_math", .{});
-        //const imgui = b.lazyDependency("imgui", .{});
-
-        const mod_nri_framework = b.addModule("nri_framework", .{
-            .target = target,
-            .optimize = optimize,
+        b.installDirectory(.{
+            .install_dir = .bin,
+            .install_subdir = "_Data",
+            .source_dir = b.path("sample_resources"),
         });
-        //Framework source
-        mod_nri_framework.addCSourceFiles(.{
-            .root = nri_framework.?.path(""),
-            .files = &nri_framework_src,
-            .flags = &.{
-                "-DWIN32_LEAN_AND_MEAN",
-                "-DNOMINMAX",
-                "-D_CRT_SECURE_NO_WARNINGS",
-            },
-            .language = .cpp,
-        });
-        mod_nri_framework.addIncludePath(nri_framework.?.path("Include"));
 
-        //detex
-        mod_nri_framework.addCSourceFiles(.{ .root = nri_framework.?.path(""), .files = &nri_framework_detex_src, .flags = &.{
+        //Buffer Sample
+        {
+            const buffers_exe = b.addExecutable(.{
+                .name = "NRISample_Buffers",
+                .root_module = setup_sample_module(b, target, optimize, "mod_sample_buffers", nri.?, mod_nri, nri_joined_defines),
+            });
+            buffers_exe.addCSourceFile(.{
+                .file = nri_samples.?.path("Source/Buffers.c"),
+                .flags = &.{},
+                .language = .c,
+            });
+            b.installArtifact(buffers_exe);
+        }
+
+        //Scene viewer sample
+        {
+            const scene_viewer_exe = b.addExecutable(.{
+                .name = "NRISample_SceneViewer",
+                .root_module = setup_sample_module(b, target, optimize, "mod_sample_buffers", nri.?, mod_nri, nri_joined_defines),
+            });
+            scene_viewer_exe.addCSourceFile(.{
+                .file = nri_samples.?.path("Source/SceneViewer.cpp"),
+                .flags = &.{"-std=c++17"},
+                .language = .cpp,
+            });
+
+            b.installArtifact(scene_viewer_exe);
+        }
+    }
+}
+
+fn setup_sample_module(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, module_name: []const u8, nri: *std.Build.Dependency, mod_nri: *std.Build.Module, nri_joined_defines: [][]const u8) *std.Build.Module {
+    const nri_framework = b.lazyDependency("nri_framework", .{});
+    const glfw = b.lazyDependency("glfw", .{});
+    const nv_math = b.lazyDependency("nv_math", .{});
+    const imgui = b.lazyDependency("imgui", .{});
+    const cgltf = b.lazyDependency("cgltf", .{});
+
+    const mod_nri_framework = b.addModule(module_name, .{
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = false,
+        .sanitize_c = .off,
+    });
+    //Framework source
+    mod_nri_framework.addCSourceFiles(.{
+        .root = nri_framework.?.path(""),
+        .files = &nri_framework_src,
+        .flags = &.{
             "-DWIN32_LEAN_AND_MEAN",
             "-DNOMINMAX",
             "-D_CRT_SECURE_NO_WARNINGS",
-        }, .language = .c });
-        mod_nri_framework.addIncludePath(nri_framework.?.path("External/Detex"));
-        //glfw
-        if (target.result.abi == .msvc) {
-            mod_nri_framework.addObjectFile(glfw.?.path("lib-vc2022/glfw3.lib"));
-        }
-        mod_nri_framework.addIncludePath(glfw.?.path("include"));
-        //nri
-        mod_nri_framework.addImport("nri", mod_nri);
-        //imgui
+            "-std=c++17",
+        },
+        .language = .cpp,
+    });
+    mod_nri_framework.addIncludePath(nri_framework.?.path("Include"));
+    mod_nri_framework.addIncludePath(nri.path("Include"));
 
-        //nv_math
-        mod_nri_framework.addIncludePath(nv_math.?.path(""));
-        mod_nri_framework.addIncludePath(nv_math.?.path("Guts"));
-
-        //samples
-        //const buffers_exe = b.addExecutable(.{
-        //    .name = "NRISample_Buffers",
-        //    .root_module = mod_nri_framework,
-        //});
-        //buffers_exe.addCSourceFile(.{
-        //    .file = nri_samples.?.path("Source/Buffers.c"),
-        //    .language = .c,
-        //});
-        //buffers_exe.linkLibC();
-        //b.installArtifact(buffers_exe);
+    //detex
+    mod_nri_framework.addCSourceFiles(.{
+        .root = nri_framework.?.path(""),
+        .files = &nri_framework_detex_src,
+        .flags = &.{
+            "-DWIN32_LEAN_AND_MEAN",
+            "-DNOMINMAX",
+            "-D_CRT_SECURE_NO_WARNINGS",
+        },
+        .language = .c,
+    });
+    mod_nri_framework.addIncludePath(nri_framework.?.path("External"));
+    //glfw
+    if (target.result.abi == .msvc) {
+        mod_nri_framework.addLibraryPath(glfw.?.path("lib-vc2022"));
+        mod_nri_framework.linkSystemLibrary("glfw3", .{ .preferred_link_mode = .static });
     }
+    mod_nri_framework.addIncludePath(glfw.?.path("include"));
+    //cgltf
+    mod_nri_framework.addIncludePath(cgltf.?.path(""));
+    //nri
+    mod_nri_framework.addImport("nri", mod_nri);
+    //imgui
+    const lib_imgui = b.addLibrary(.{
+        .name = "lib_imgui",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .sanitize_thread = false,
+            .sanitize_c = .off,
+        }),
+    });
+    lib_imgui.root_module.addCSourceFiles(.{
+        .root = imgui.?.path(""),
+        .files = &.{
+            "imgui.cpp",
+            "imgui_draw.cpp",
+            "imgui_tables.cpp",
+            "imgui_widgets.cpp",
+        },
+        .flags = nri_joined_defines,
+        .language = .cpp,
+    });
+    lib_imgui.root_module.addIncludePath(imgui.?.path(""));
+    lib_imgui.linkLibC();
+    mod_nri_framework.addIncludePath(imgui.?.path(""));
+    mod_nri_framework.linkLibrary(lib_imgui);
+
+    //nv_math
+    mod_nri_framework.addIncludePath(nv_math.?.path(""));
+    return mod_nri_framework;
+}
+
+const ShaderTargetAPI = enum {
+    D3D12,
+    Vulkan,
+};
+
+const ShaderMakeCommandOptions = struct {
+    b: *std.Build,
+    shadermake: *std.Build.Step.Compile,
+    target_api: ShaderTargetAPI,
+    shader_compiler_path: std.Build.LazyPath,
+    project_name: []const u8,
+    source_dir: std.Build.LazyPath,
+    shader_config_path: std.Build.LazyPath,
+    output_path: []const u8,
+    include_paths: []const std.Build.LazyPath,
+    s_reg_shift: []const u8 = "0",
+    b_reg_shift: []const u8 = "0",
+    u_reg_shift: []const u8 = "0",
+    t_reg_shift: []const u8 = "0",
+    header_blob: bool = false,
+};
+
+fn run_shadermake_command(opt: ShaderMakeCommandOptions) struct { *std.Build.Step.Run, std.Build.LazyPath } {
+    const run_shadermake = opt.b.addRunArtifact(opt.shadermake);
+    run_shadermake.addArg("-p");
+    run_shadermake.addArg(switch (opt.target_api) {
+        .D3D12 => "DXIL",
+        .Vulkan => "SPIRV",
+    });
+    run_shadermake.addArg("--compiler");
+    run_shadermake.addFileArg(opt.shader_compiler_path);
+    run_shadermake.addArg("--project");
+    run_shadermake.addArg(opt.project_name);
+    run_shadermake.addArg("--compactProgress");
+    run_shadermake.addArg("--binary");
+    run_shadermake.addArg("--flatten");
+    run_shadermake.addArg("--stripReflection");
+    run_shadermake.addArg("--WX");
+    run_shadermake.addArg("--sRegShift");
+    run_shadermake.addArg(opt.s_reg_shift);
+    run_shadermake.addArg("--bRegShift");
+    run_shadermake.addArg(opt.b_reg_shift);
+    run_shadermake.addArg("--uRegShift");
+    run_shadermake.addArg(opt.u_reg_shift);
+    run_shadermake.addArg("--tRegShift");
+    run_shadermake.addArg(opt.t_reg_shift);
+    if (opt.header_blob) {
+        run_shadermake.addArg("--headerBlob");
+    }
+    run_shadermake.addArg("--sourceDir");
+    run_shadermake.addDirectoryArg(opt.source_dir);
+    run_shadermake.addArg("--ignoreConfigDir");
+    run_shadermake.addArg("-c");
+    run_shadermake.addFileArg(opt.shader_config_path);
+    run_shadermake.addArg("-o");
+    const output_dir = run_shadermake.addOutputDirectoryArg(opt.output_path);
+    for (opt.include_paths) |include_path| {
+        run_shadermake.addArg("-I");
+        run_shadermake.addDirectoryArg(include_path);
+    }
+    opt.b.installDirectory(.{
+        .source_dir = output_dir,
+        .install_dir = .bin,
+        .install_subdir = opt.output_path,
+    });
+    //installBinFile(opt.b, &run_shadermake.step, output_dir, opt.output_path);
+
+    return .{ run_shadermake, output_dir };
 }
 
 const nvapi_hlsl_files = [_][]const u8{

@@ -40,6 +40,11 @@
             .hash = "N-V-__8AAK6OBwCa5n96KhsfE8IbVp6WOzumVkphnAINY2Ky",
             .lazy = true,
         },
+        .cgltf = .{ //for nri_samples
+            .url = "https://github.com/jkuhlmann/cgltf/archive/85cd62382dfea638278962690cf515023f33ed00.zip",
+            .hash = "N-V-__8AAPFuBABIkL_hQBnt6WXcaRM_ZIZEQGvfTnZVGJ0A",
+            .lazy = true,
+        },
         .dx12_headers = .{
             .url = "https://github.com/swan-www/DirectX-Headers/archive/refs/tags/v1.619.1.zip",
             .hash = "N-V-__8AAGDkQAC-N44dhfT9Szcv4b6j5gq_bJe_mnBt60EM",
