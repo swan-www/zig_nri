@@ -170,7 +170,7 @@ pub fn build(b: *std.Build) !void {
     });
     translate_nri.addIncludePath(b.path(""));
     nri_options.apply_defines_to_translate(translate_nri);
-    const mod_translate_nri = translate_nri.addModule("nri");
+    const mod_translate_nri = translate_nri.addModule("nri_translate");
     _ = &mod_translate_nri;
 
     const mod_nri = b.addModule("nri", .{
