@@ -40,10 +40,10 @@ const NRIOptions = struct {
     EnableShaderMake: OptionFlag,
     EnableNRISamples: OptionFlag,
 
-    pub fn init(b: *std.Build, target: std.Build.ResolvedTarget) @This() {
+    pub fn init(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) @This() {
         var opt: @This() = undefined;
-        opt.EnableNVTXSupport = OptionFlag.option(b, "NRI_ENABLE_NVTX_SUPPORT", "Annotations for NVIDIA Nsight Systems.", true);
-        opt.EnableDebugNamesAndAnnotations = OptionFlag.option(b, "NRI_ENABLE_DEBUG_NAMES_AND_ANNOTATIONS", "Enable debug names, host and device annotations.", true);
+        opt.EnableNVTXSupport = OptionFlag.option(b, "NRI_ENABLE_NVTX_SUPPORT", "Annotations for NVIDIA Nsight Systems.", (optimize == .Debug));
+        opt.EnableDebugNamesAndAnnotations = OptionFlag.option(b, "NRI_ENABLE_DEBUG_NAMES_AND_ANNOTATIONS", "Enable debug names, host and device annotations.", (optimize == .Debug));
         opt.EnableNoneSupport = OptionFlag.option(b, "NRI_ENABLE_NONE_SUPPORT", "Enable NONE backend.", true);
         opt.EnableVKSupport = OptionFlag.option(b, "NRI_ENABLE_VK_SUPPORT", "Enable Vulkan backend.", true);
         opt.EnableValidationSupport = OptionFlag.option(b, "NRI_ENABLE_VALIDATION_SUPPORT", "Enable Validation backend (otherwise 'enableNRIValidation' is ignored)", true);
@@ -127,7 +127,7 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const nri_options = NRIOptions.init(b, target);
+    const nri_options = NRIOptions.init(b, target, optimize);
 
     //Set the output directory to use a per-target folder
     const joined_target_str = try std.mem.concat(b.allocator, u8, &.{ @tagName(target.result.cpu.arch), "_", @tagName(target.result.os.tag), "_", @tagName(target.result.abi) });
@@ -172,6 +172,7 @@ pub fn build(b: *std.Build) !void {
     nri_options.apply_defines_to_translate(translate_nri);
     const mod_translate_nri = translate_nri.addModule("nri_translate");
     _ = &mod_translate_nri;
+    b.getInstallStep().dependOn(&translate_nri.step);
 
     const mod_nri = b.addModule("nri", .{
         .target = target,
@@ -845,71 +846,81 @@ fn setup_sample_module(b: *std.Build, target: std.Build.ResolvedTarget, optimize
         .sanitize_thread = false,
         .sanitize_c = .off,
     });
-    //Framework source
-    mod_nri_framework.addCSourceFiles(.{
-        .root = nri_framework.?.path(""),
-        .files = &nri_framework_src,
-        .flags = &.{
-            "-DWIN32_LEAN_AND_MEAN",
-            "-DNOMINMAX",
-            "-D_CRT_SECURE_NO_WARNINGS",
-            "-std=c++17",
-        },
-        .language = .cpp,
-    });
-    mod_nri_framework.addIncludePath(nri_framework.?.path("Include"));
-    mod_nri_framework.addIncludePath(nri.path("Include"));
+    if (nri_framework) |_| {
+        //Framework source
+        mod_nri_framework.addCSourceFiles(.{
+            .root = nri_framework.?.path(""),
+            .files = &nri_framework_src,
+            .flags = &.{
+                "-DWIN32_LEAN_AND_MEAN",
+                "-DNOMINMAX",
+                "-D_CRT_SECURE_NO_WARNINGS",
+                "-std=c++17",
+            },
+            .language = .cpp,
+        });
+        mod_nri_framework.addIncludePath(nri_framework.?.path("Include"));
+        mod_nri_framework.addIncludePath(nri.path("Include"));
 
-    //detex
-    mod_nri_framework.addCSourceFiles(.{
-        .root = nri_framework.?.path(""),
-        .files = &nri_framework_detex_src,
-        .flags = &.{
-            "-DWIN32_LEAN_AND_MEAN",
-            "-DNOMINMAX",
-            "-D_CRT_SECURE_NO_WARNINGS",
-        },
-        .language = .c,
-    });
-    mod_nri_framework.addIncludePath(nri_framework.?.path("External"));
-    //glfw
-    if (target.result.abi == .msvc) {
-        mod_nri_framework.addLibraryPath(glfw.?.path("lib-vc2022"));
-        mod_nri_framework.linkSystemLibrary("glfw3", .{ .preferred_link_mode = .static });
+        //detex
+        mod_nri_framework.addCSourceFiles(.{
+            .root = nri_framework.?.path(""),
+            .files = &nri_framework_detex_src,
+            .flags = &.{
+                "-DWIN32_LEAN_AND_MEAN",
+                "-DNOMINMAX",
+                "-D_CRT_SECURE_NO_WARNINGS",
+            },
+            .language = .c,
+        });
+        mod_nri_framework.addIncludePath(nri_framework.?.path("External"));
     }
-    mod_nri_framework.addIncludePath(glfw.?.path("include"));
+    //glfw
+    if (glfw) |_| {
+        if (target.result.abi == .msvc) {
+            mod_nri_framework.addLibraryPath(glfw.?.path("lib-vc2022"));
+            mod_nri_framework.linkSystemLibrary("glfw3", .{ .preferred_link_mode = .static });
+        }
+        mod_nri_framework.addIncludePath(glfw.?.path("include"));
+    }
     //cgltf
-    mod_nri_framework.addIncludePath(cgltf.?.path(""));
+    if (cgltf) |_| {
+        mod_nri_framework.addIncludePath(cgltf.?.path(""));
+    }
     //nri
     mod_nri_framework.addImport("nri", mod_nri);
     //imgui
-    const lib_imgui = b.addLibrary(.{
-        .name = "lib_imgui",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .sanitize_thread = false,
-            .sanitize_c = .off,
-        }),
-    });
-    lib_imgui.root_module.addCSourceFiles(.{
-        .root = imgui.?.path(""),
-        .files = &.{
-            "imgui.cpp",
-            "imgui_draw.cpp",
-            "imgui_tables.cpp",
-            "imgui_widgets.cpp",
-        },
-        .flags = nri_joined_defines,
-        .language = .cpp,
-    });
-    lib_imgui.root_module.addIncludePath(imgui.?.path(""));
-    lib_imgui.linkLibC();
-    mod_nri_framework.addIncludePath(imgui.?.path(""));
-    mod_nri_framework.linkLibrary(lib_imgui);
+    if (imgui) |_| {
+        const lib_imgui = b.addLibrary(.{
+            .name = "lib_imgui",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .sanitize_thread = false,
+                .sanitize_c = .off,
+            }),
+        });
+        lib_imgui.root_module.addCSourceFiles(.{
+            .root = imgui.?.path(""),
+            .files = &.{
+                "imgui.cpp",
+                "imgui_draw.cpp",
+                "imgui_tables.cpp",
+                "imgui_widgets.cpp",
+            },
+            .flags = nri_joined_defines,
+            .language = .cpp,
+        });
+        lib_imgui.root_module.addIncludePath(imgui.?.path(""));
+        lib_imgui.linkLibC();
+        mod_nri_framework.addIncludePath(imgui.?.path(""));
+        mod_nri_framework.linkLibrary(lib_imgui);
+    }
 
     //nv_math
-    mod_nri_framework.addIncludePath(nv_math.?.path(""));
+    if (nv_math) |_| {
+        mod_nri_framework.addIncludePath(nv_math.?.path(""));
+    }
     return mod_nri_framework;
 }
 
