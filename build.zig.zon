@@ -8,6 +8,7 @@
         "build.zig.zon",
         "nri.h",
         "nri.zig",
+        "nri_agility_sdk.zig",
         "LICENSE",
     },
     .dependencies = .{
