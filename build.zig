@@ -120,7 +120,6 @@ pub fn installArtifact(b: *std.Build, dep: *std.Build.Step.Compile) void {
     b.getInstallStep().dependOn(&installedFile.step);
 }
 
-const NRI_AGILITY_SDK_VERSION_MAJOR = "619";
 const NGX_VERSION = "310.6.0";
 
 pub fn build(b: *std.Build) !void {
@@ -128,6 +127,14 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const nri_options = NRIOptions.init(b, target, optimize);
+
+    const NRI_AGILITY_SDK_VERSION_MAJOR = b.option(u32, "NRI_AGILITY_SDK_VERSION_MAJOR", "NRI_AGILITY_SDK_VERSION_MAJOR") orelse 619;
+    const NRI_AGILITY_SDK_DIR = b.option([]const u8, "NRI_AGILITY_SDK_DIR", "NRI_AGILITY_SDK_DIR") orelse "./D3D12/";
+
+    const d3d12_options = b.addOptions();
+    d3d12_options.addOption(u32, "NRI_AGILITY_SDK_VERSION_MAJOR", NRI_AGILITY_SDK_VERSION_MAJOR);
+    const NRI_AGILITY_SDK_DIR_SENTINEL = try std.fmt.allocPrintSentinel(b.allocator, "{s}", .{NRI_AGILITY_SDK_DIR}, 0);
+    d3d12_options.addOption([:0]const u8, "NRI_AGILITY_SDK_DIR", NRI_AGILITY_SDK_DIR_SENTINEL);
 
     //Set the output directory to use a per-target folder
     const joined_target_str = try std.mem.concat(b.allocator, u8, &.{ @tagName(target.result.cpu.arch), "_", @tagName(target.result.os.tag), "_", @tagName(target.result.abi) });
@@ -137,6 +144,10 @@ pub fn build(b: *std.Build) !void {
     b.dest_dir = try std.fs.path.join(b.allocator, &.{ b.install_path, joined_target_str });
 
     const nri = b.lazyDependency("nri", .{});
+    if (nri == null) {
+        return;
+    }
+
     const nri_samples = if (nri_options.EnableNRISamples.val) b.lazyDependency("nri_samples", .{}) else null;
     const dx12_headers = if (nri_options.EnableD3D12Support.val) b.lazyDependency("dx12_headers", .{}) else null;
     const agility_sdk = if (nri_options.EnableAgilitySdkSupport.val) b.lazyDependency("agility_sdk", .{}) else null;
@@ -151,28 +162,28 @@ pub fn build(b: *std.Build) !void {
     const nvapi = if (nri_options.EnableNVAPI.val) b.lazyDependency("nvapi", .{}) else null;
     const shadermake = if (nri_options.EnableShaderMake.val) b.lazyDependency("shadermake", .{}) else null;
 
-    _ = &agility_sdk;
-    _ = &nvtx;
-    _ = &vulkan_headers;
-    _ = &vulkan_allocator;
-    _ = &ngx_sdk;
-    _ = &ffx_sdk;
-    _ = &xess_sdk;
-    _ = &d3d12_allocator;
-    _ = &amd_ags;
-    _ = &nvapi;
-    _ = &shadermake;
-
-    const translate_nri = b.addTranslateC(.{
-        .root_source_file = b.path("nri.h"),
-        .target = target,
-        .optimize = optimize,
-    });
-    translate_nri.addIncludePath(b.path(""));
-    nri_options.apply_defines_to_translate(translate_nri);
-    const mod_translate_nri = translate_nri.addModule("nri_translate");
-    _ = &mod_translate_nri;
-    b.getInstallStep().dependOn(&translate_nri.step);
+    const make_new_translate = false;
+    var translate_nri: ?*std.Build.Step.TranslateC = null;
+    if (make_new_translate) {
+        translate_nri = b.addTranslateC(.{
+            .root_source_file = b.path("nri.h"),
+            .target = target,
+            .optimize = optimize,
+        });
+        translate_nri.?.addIncludePath(b.path(""));
+        nri_options.apply_defines_to_translate(translate_nri.?);
+        //const installed_nri_zig = try std.fs.path.join(b.allocator, &.{ joined_target_str, "nri_translate.zig" });
+        const installedFile = b.addInstallFile(translate_nri.?.getOutput(), "nri_translate.zig");
+        installedFile.step.dependOn(&translate_nri.?.step);
+        b.getInstallStep().dependOn(&installedFile.step);
+    } else {
+        const nri_translate_module = b.addModule("nri_translate", .{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("nri.zig"),
+        });
+        _ = &nri_translate_module;
+    }
 
     const mod_nri = b.addModule("nri", .{
         .target = target,
@@ -186,9 +197,6 @@ pub fn build(b: *std.Build) !void {
     });
     lib_nri.linkLibC();
     b.installArtifact(lib_nri);
-
-    const installed_nri_zig = try std.fs.path.join(b.allocator, &.{ joined_target_str, "nri.zig" });
-    installFile(b, &translate_nri.step, translate_nri.getOutput(), installed_nri_zig);
 
     const nri_option_defines = nri_options.get_defines(b.allocator);
     const nri_compile_defines = &.{
@@ -229,11 +237,15 @@ pub fn build(b: *std.Build) !void {
         vk_flags = vk_flags_backing[0..num_vk_flags];
     }
     const nri_joined_defines = try std.mem.concat(b.allocator, []const u8, &.{ nri_option_defines, nri_compile_defines, vk_flags });
-    translate_nri.defineCMacroRaw("WIN32_LEAN_AND_MEAN");
-    translate_nri.defineCMacroRaw("NOMINMAX");
-    translate_nri.defineCMacroRaw("_CRT_SECURE_NO_WARNINGS");
-    for (vk_flags) |def| {
-        translate_nri.defineCMacroRaw(def[2..]);
+    if (translate_nri) |_| {
+        translate_nri.?.defineCMacroRaw("WIN32_LEAN_AND_MEAN");
+        translate_nri.?.defineCMacroRaw("NOMINMAX");
+        translate_nri.?.defineCMacroRaw("_CRT_SECURE_NO_WARNINGS");
+        translate_nri.?.defineCMacro("MIDL_INTERFACE(x)", "x");
+        for (vk_flags) |def| {
+            _ = &def;
+            translate_nri.?.defineCMacroRaw(def[2..]);
+        }
     }
 
     //NRI
@@ -285,7 +297,9 @@ pub fn build(b: *std.Build) !void {
 
         lib_nri_shared.root_module.addIncludePath(nri.?.path("Include"));
         lib_nri_shared.root_module.addIncludePath(nri.?.path("Source/Shared"));
-        translate_nri.addIncludePath(nri.?.path(""));
+        if (translate_nri) |_| {
+            translate_nri.?.addIncludePath(nri.?.path(""));
+        }
 
         //FFX
         if (ffx_sdk) |_| {
@@ -322,6 +336,16 @@ pub fn build(b: *std.Build) !void {
                 .linkage = .static,
             });
 
+            const nri_d3d12_exports = b.addModule(
+                "nri_d3d12_exports",
+                .{
+                    .target = target,
+                    .optimize = optimize,
+                    .root_source_file = b.path("nri_agility_sdk.zig"),
+                },
+            );
+            nri_d3d12_exports.addImport("options", d3d12_options.createModule());
+
             lib_nri_d3d12.root_module.addCSourceFiles(.{
                 .root = nri.?.path(""),
                 .files = &nri_d3d12_src,
@@ -355,7 +379,9 @@ pub fn build(b: *std.Build) !void {
 
             if (agility_sdk) |_| {
                 lib_nri_d3d12.root_module.addIncludePath(agility_sdk.?.path("build/native/include"));
-                lib_nri_d3d12.root_module.addCMacro("NRI_AGILITY_SDK_VERSION_MAJOR", NRI_AGILITY_SDK_VERSION_MAJOR);
+                var agi_sdk_string_buff: [128]u8 = std.mem.zeroes([128]u8);
+                const NRI_AGILITY_SDK_VERSION_MAJOR_STRING = try std.fmt.bufPrintZ(&agi_sdk_string_buff, "{d}", .{NRI_AGILITY_SDK_VERSION_MAJOR});
+                lib_nri_d3d12.root_module.addCMacro("NRI_AGILITY_SDK_VERSION_MAJOR", NRI_AGILITY_SDK_VERSION_MAJOR_STRING);
             } else {
                 lib_nri_d3d12.root_module.addCMacro("NRI_AGILITY_SDK_VERSION_MAJOR", "D3D12_SDK_VERSION");
             }
@@ -369,7 +395,9 @@ pub fn build(b: *std.Build) !void {
             if (dx12_headers) |_| {
                 lib_nri_d3d12.root_module.addIncludePath(dx12_headers.?.path("include"));
                 lib_nri_shared.root_module.addIncludePath(dx12_headers.?.path("include"));
-                translate_nri.addIncludePath(dx12_headers.?.path("include"));
+                if (translate_nri) |_| {
+                    translate_nri.?.addIncludePath(dx12_headers.?.path("include"));
+                }
             }
 
             //FFX
@@ -483,7 +511,11 @@ pub fn build(b: *std.Build) !void {
                 return;
             },
         };
-        b.addNamedLazyPath("agility_sdk_bin_dir", agility_sdk.?.path(agility_sdk_bin_dir_path));
+        const d3d12_core_path = try std.fs.path.join(b.allocator, &.{ agility_sdk_bin_dir_path, "D3D12Core.dll" });
+        const d3d12_layers_path = try std.fs.path.join(b.allocator, &.{ agility_sdk_bin_dir_path, "d3d12SDKLayers.dll" });
+        b.addNamedLazyPath("agility_sdk_d3d12_path", agility_sdk.?.path(agility_sdk_bin_dir_path));
+        b.addNamedLazyPath("agility_sdk_d3d12_core_path", agility_sdk.?.path(d3d12_core_path));
+        b.addNamedLazyPath("agility_sdk_d3d12_layers_path", agility_sdk.?.path(d3d12_layers_path));
     }
 
     //FFX
@@ -513,6 +545,7 @@ pub fn build(b: *std.Build) !void {
             mod_nri.linkSystemLibrary("libxess", .{ .needed = true, .preferred_link_mode = .dynamic });
 
             const xess_dll_path = try std.fs.path.join(b.allocator, &.{ "bin", "libxess.dll" });
+            b.addNamedLazyPath("xess_dll_path", xess_sdk.?.path(xess_dll_path));
             installBinFile(b, null, xess_sdk.?.path(xess_dll_path), "libxess.dll");
         }
     }
@@ -530,7 +563,9 @@ pub fn build(b: *std.Build) !void {
         mod_nri.*.addObjectFile(nvapi.?.path(nvapi_obj_path));
         b.addNamedLazyPath("nvapi_hlsl_extension_include", nvapi.?.path(""));
 
-        translate_nri.addIncludePath(nvapi.?.path(""));
+        if (translate_nri) |_| {
+            translate_nri.?.addIncludePath(nvapi.?.path(""));
+        }
     }
 
     //AMDAGS
@@ -549,13 +584,16 @@ pub fn build(b: *std.Build) !void {
             .x86 => "amd_ags_x86.dll",
             else => unreachable,
         };
-        const xess_dll_path = try std.fs.path.join(b.allocator, &.{ "ags_lib/lib", amd_ags_dll_name });
-        installBinFile(b, null, amd_ags.?.path(xess_dll_path), amd_ags_dll_name);
+        const amd_ags_dll_path = try std.fs.path.join(b.allocator, &.{ "ags_lib/lib", amd_ags_dll_name });
+        b.addNamedLazyPath("amd_ags_dll_path", amd_ags.?.path(amd_ags_dll_path));
+        installBinFile(b, null, amd_ags.?.path(amd_ags_dll_path), amd_ags_dll_name);
 
         b.addNamedLazyPath("amd_ags_hlsl_extension_include", amd_ags.?.path(""));
 
-        translate_nri.addIncludePath(amd_ags.?.path("ags_lib/inc"));
-        translate_nri.defineCMacroRaw("AGS_EXCLUDE_DIRECTX_11");
+        if (translate_nri) |_| {
+            translate_nri.?.addIncludePath(amd_ags.?.path("ags_lib/inc"));
+            translate_nri.?.defineCMacroRaw("AGS_EXCLUDE_DIRECTX_11");
+        }
     }
 
     //NGX
@@ -605,6 +643,9 @@ pub fn build(b: *std.Build) !void {
 
         dlss_sr_dll_lazypath = ngx_sdk.?.path(dlss_sr_dll_path);
         dlss_rr_dll_lazypath = ngx_sdk.?.path(dlss_rr_dll_path);
+
+        b.addNamedLazyPath("dlss_sr_dll_path", dlss_sr_dll_lazypath.?);
+        b.addNamedLazyPath("dlss_rr_dll_path", dlss_rr_dll_lazypath.?);
 
         mod_nri.addObjectFile(ngx_sdk.?.path(ngx_obj_path));
         mod_nri.addIncludePath(ngx_sdk.?.path("include"));

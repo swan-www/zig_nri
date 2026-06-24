@@ -17,7 +17,7 @@
     "zls": {
       "binary": {
         // omit the following line if `zls` is in your PATH
-        "path": "D:/devspace/Lampad/toolchain/common/zls/zls.exe",
+        "path": "E:/devspace/Lampad/toolchain/common/zls/zls.exe",
       },
       // There are two ways to set config options:
       //   - edit your `zls.json` that applies to any editor that uses ZLS
@@ -34,7 +34,7 @@
           // "enable_build_on_save": true,
 
           // omit the following line if `zig` is in your PATH
-          "zig_exe_path": "D:/devspace/Lampad/toolchain/common/ziglang/zig.exe",
+          "zig_exe_path": "E:/devspace/Lampad/toolchain/common/ziglang/zig.exe",
         },
       },
     },

@@ -7,12 +7,14 @@
         "build.zig",
         "build.zig.zon",
         "nri.h",
+        "nri.zig",
         "LICENSE",
     },
     .dependencies = .{
         .nri = .{
-            .url = "https://github.com/swan-www/NRI/archive/refs/tags/v179.zip",
-            .hash = "N-V-__8AAA2XIQCNFFcYGZAvBaz2UakJCZoOF878CViULV70",
+            .url = "https://github.com/swan-www/NRI/archive/refs/heads/fix_179.zip",
+            .hash = "N-V-__8AANiUIQD9oUfcOm1edLjuWzfAZqk2CvagNgSYm-35",
+            //.path = "../NRI",
             .lazy = true,
         },
         .nri_samples = .{

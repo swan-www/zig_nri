@@ -12,20 +12,6 @@
 #include "nvapi.h"
 #endif //NRI_ENABLE_NVAPI
 
-#ifdef NRI_ENABLE_D3D12_SUPPORT
-#ifdef NRI_ENABLE_AGILITY_SDK_SUPPORT
-#include <stdint.h>
-#ifdef __cplusplus
-extern "C" {
-#endif
-__declspec(dllexport) extern const uint32_t D3D12SDKVersion;
-__declspec(dllexport) extern const char* D3D12SDKPath;
-#ifdef __cplusplus
-}
-#endif
-#endif //NRI_ENABLE_AGILITY_SDK_SUPPORT
-#endif //NRI_ENABLE_D3D12_SUPPORT
-
 #ifdef NRI_ENABLE_AMDAGS
 
 //Must include after d3d
@@ -37,7 +23,6 @@ __declspec(dllexport) extern const char* D3D12SDKPath;
 #include "Resources/Version.h"
 
 #include "Include/NRI.h"
-#include "Include/NRIDescs.h"
 #include "Include/NRIMacro.h"
 
 #include "Include/Extensions/NRIDeviceCreation.h"
